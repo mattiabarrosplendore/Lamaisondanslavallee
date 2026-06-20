@@ -60,23 +60,23 @@
 
   <div id="timebar">
     <span id="clock">--:--</span>
-    <input id="scrub" type="range" min="0" max="1439" value="900">
-    <span id="live">prova · 15:00</span>
+    <input id="scrub" type="range" min="0" max="1439" value="720">
+    <span id="live">preview · 12:00</span>
   </div>
 
   <div id="log">
-    <div class="cell">stanza<span class="v" data-k="room">—</span></div>
-    <div class="cell">sole<span class="v" data-k="sun">—</span></div>
+    <div class="cell">room<span class="v" data-k="room">—</span></div>
+    <div class="cell">sun<span class="v" data-k="sun">—</span></div>
     <div class="cell">temp<span class="v" data-k="temp">—</span></div>
-    <div class="cell">nuvole<span class="v" data-k="cloud">—</span></div>
-    <div class="cell">vento<span class="v" data-k="wind">—</span></div>
-    <div class="cell">umidità<span class="v" data-k="hum">—</span></div>
+    <div class="cell">clouds<span class="v" data-k="cloud">—</span></div>
+    <div class="cell">wind<span class="v" data-k="wind">—</span></div>
+    <div class="cell">humidity<span class="v" data-k="hum">—</span></div>
   </div>
 
   <div id="gate">
     <h1>bordone</h1>
-    <div class="start">tocca per iniziare</div>
-    <div class="sub">il Manoir de la Moissie che si rilegge dal proprio cielo. attraversa le sue stanze nel corso del giorno. non finisce.</div>
+    <div class="start">tap to begin</div>
+    <div class="sub">the Manoir de la Moissie re-read through its own sky. it moves through the rooms over the day. it never ends.</div>
   </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
@@ -92,41 +92,55 @@ const state = {
 
 /* ===== STANZE — fondamentale (Hz) e nome, dai modi misurati ===== */
 const ROOMS = {
-  cucina:    { F:71.8, label:"cucina"    },   // re (D) - la quinta del sol
-  soggiorno: { F:61.7, label:"soggiorno" },   // si (B) - la terza; il mi cantato ci fa una quarta consonante
-  bedroom:   { F:98.0, label:"camera"    }    // sol (G) - la fondamentale; confermato da tono e IR
+  cucina:    { F:71.8 },   // re (D) - cucina
+  soggiorno: { F:61.7 },   // si (B) - slot sociale: giardino (estate) / soggiorno (inverno)
+  bedroom:   { F:98.0 }    // sol (G) - camera
 };
 
-/* ===== ORARIO DELLE STANZE (minuti del giorno) =====
-   camera 21:00-10:00 · cucina 10:00-14:00 · soggiorno 14:00-21:00
-   transizioni in dissolvenza di 40 min attorno a ogni confine. */
+/* ===== ORARIO =====
+   cucina 10-14 · sociale 14-18 · cucina 18-20 · sociale 20-22 · camera 22-10
+   lo slot "sociale" (soggiorno) è giardino d'estate, soggiorno d'inverno.
+   transizioni in dissolvenza di 40 min. */
 function smoothstep(x){ x=Math.min(1,Math.max(0,x)); return x*x*(3-2*x); }
+function segAt(t){
+  if(t>=600 && t<840)  return "cucina";     // 10-14
+  if(t>=840 && t<1080) return "soggiorno";  // 14-18
+  if(t>=1080&& t<1200) return "cucina";     // 18-20
+  if(t>=1200&& t<1320) return "soggiorno";  // 20-22
+  return "bedroom";                          // 22-10
+}
 function roomWeights(t){
   let w={cucina:0,soggiorno:0,bedroom:0};
-  if(t>=600 && t<840) w.cucina=1;
-  else if(t>=840 && t<1260) w.soggiorno=1;
-  else w.bedroom=1;
-  const W=40;
-  const edges=[[600,"bedroom","cucina"],[840,"cucina","soggiorno"],[1260,"soggiorno","bedroom"]];
-  for(const [b,from,to] of edges){
+  w[segAt(t)]=1;
+  const W=40, edges=[600,840,1080,1200,1320];
+  for(const b of edges){
     const d=t-b;
     if(Math.abs(d)<=W/2){ const s=smoothstep((d+W/2)/W);
+      const from=segAt(b-W/2-1), to=segAt(b+W/2+1);
       w={cucina:0,soggiorno:0,bedroom:0}; w[from]=1-s; w[to]=s; }
   }
   return w;
+}
+/* fattore stagione: 1 in estate (maggio-fine settembre), 0 in inverno, con ~2 settimane di transizione */
+function summerFactor(date){
+  const start=new Date(Date.UTC(date.getUTCFullYear(),0,0));
+  const doy=Math.floor((date-start)/86400000);
+  return Math.min(1,Math.max(0, Math.min((doy-105)/16, (288-doy)/15)));
 }
 function fundamentalFromWeights(w){
   return Math.exp(w.cucina*Math.log(ROOMS.cucina.F)
                 + w.soggiorno*Math.log(ROOMS.soggiorno.F)
                 + w.bedroom*Math.log(ROOMS.bedroom.F));
 }
-function roomLabel(w){
+function roomLabel(w, summer){
   let best="cucina",m=-1; for(const k in w){ if(w[k]>m){m=w[k];best=k;} }
-  return ROOMS[best].label;
+  if(best==="cucina")  return "kitchen";
+  if(best==="bedroom") return "bedroom";
+  return summer>0.5 ? "garden" : "living room";   // lo slot sociale cambia col tempo dell'anno
 }
 
 /* ===== TEMPO ===== */
-let timeOverride=900;   // prova: apre alle 15:00 (per il live, premi "ora reale")
+let timeOverride=720;   // prova: apre alle 12:00 (cucina). per il live, premi "live"
 function currentDate(){ if(timeOverride===null) return new Date();
   const d=new Date(); d.setHours(Math.floor(timeOverride/60), timeOverride%60, 0, 0); return d; }
 
@@ -193,7 +207,7 @@ function buildEngine(){
   const spec=[
     {mul:0.5, base:0.02, night:true },{mul:1.0, base:0.06 },{mul:1.2, base:0.05, night:true },
     {mul:1.5, base:0.12 },{mul:2.0, base:0.08 },{mul:3.0, base:0.15 },
-    {mul:4.0, base:0.12 },{mul:5.0, base:0.08, high:true },{mul:6.0, base:0.04, high:true }
+    {mul:4.0, base:0.10 },{mul:5.0, base:0.05, high:true },{mul:6.0, base:0.025, high:true }
   ];
   const voices=spec.map((p,i)=>{
     const osc=new Tone.Oscillator({frequency:71.8*p.mul, type:"sine"}).start();
@@ -225,39 +239,51 @@ function buildEngine(){
     overtones.push({osc, env, lvl, opan, busy:false});
   }
 
-  master.gain.rampTo(0.40, 6);
+  master.gain.rampTo(0.36, 6);
 
   const e={ master, dry, filter, wetBus, fallbackVerb, panner, busDry, voices, nLevel, nFilter, rLevel, overtones,
             currentF:71.8, roomW:{cucina:1,soggiorno:0,bedroom:0}, garden:0, hasIR:false, convs:null, hum:null,
-            gardenBeds:null, gardenEvents:null };
+            beds:null, gardenEvents:null };
   loadRoomAudio(e);   // asincrono: convoluzione + voce
-  loadGarden(e);      // asincrono: letti ed eventi del giardino
+  loadBeds(e);        // asincrono: letti per stanza + giardino, ed eventi
   return e;
 }
 
-/* carica i suoni del giardino (letti a grani + eventi); se falliscono resta tutto sintetico */
-async function loadGarden(e){
+/* carica i letti (per stanza + giardino) e gli eventi; se falliscono resta tutto sintetico */
+async function loadBeds(e){
   const tryBuf=(url)=>Promise.race([
     new Promise((res,rej)=>{ const b=new Tone.Buffer(url, ()=>res(b), ()=>rej(0)); }),
     new Promise((_,rej)=>setTimeout(()=>rej(0),9000)) ]);
-  // letti: ambiente, cicale, uccelli - granulati, stereo, entrano col giardino
-  try{
-    const beds=[["audio/bed_giardino.mp3","giardino",0.42],
-                ["audio/bed_cicale.mp3","cicale",0.40],
-                ["audio/bed_birds.mp3","birds",0.34]];
-    e.gardenBeds=[];
-    for(const [url,kind,base] of beds){
-      const buf=await tryBuf(url);
+  // letti registrati - più presenza. base più alte e un pan lento L<->R per ognuno
+  const defs=[
+    ["audio/bed_cucina.mp3",            {room:"cucina",    base:0.62}],
+    ["audio/bed_soggiorno_a.mp3",       {room:"soggiorno", base:0.50}],
+    ["audio/bed_soggiorno_b.mp3",       {room:"soggiorno", base:0.46}],
+    ["audio/bed_notte_a.mp3",           {room:"bedroom",   base:0.54}],
+    ["audio/bed_notte_b.mp3",           {room:"bedroom",   base:0.48}],
+    ["audio/bed_giardino.mp3",          {garden:true, base:0.46}],
+    ["audio/bed_cicale.mp3",            {garden:true, base:0.44, kind:"cicale"}],
+    ["audio/bed_birds.mp3",             {garden:true, base:0.40, kind:"birds"}],
+    ["audio/bed_giardino_uccellini.mp3",{garden:true, base:0.38, kind:"birds"}]
+  ];
+  e.beds=[];
+  for(const [url,meta] of defs){
+    try{ const buf=await tryBuf(url);
       const gp=new Tone.GrainPlayer({url:buf, loop:true, grainSize:0.35, overlap:0.2, detune:0});
-      const g=new Tone.Gain(0.0).connect(e.busDry); gp.connect(g); gp.start();
-      e.gardenBeds.push({player:gp, gain:g, kind, base});
-    }
-  }catch(err){ e.gardenBeds=null; }
+      const g=new Tone.Gain(0.0);
+      const pan=new Tone.Panner(0).connect(e.busDry);
+      gp.connect(g); g.connect(pan); gp.start();
+      const plfo=new Tone.LFO({frequency:0.018+Math.random()*0.03, min:-0.7, max:0.7, type:"sine"}).start();
+      plfo.connect(pan.pan);                       // bel pan L<->R, lento e largo
+      e.beds.push({player:gp, gain:g, pan, plfo, ...meta});
+    }catch(err){}
+  }
+  if(!e.beds.length) e.beds=null;
   // eventi: passi nelle foglie, voci alla piscina - one-shot, sparsi, panpottati a caso
   try{
-    const evs=[["audio/event_camminata.mp3"],["audio/event_pool.mp3"]];
+    const evs=["audio/event_camminata.mp3","audio/event_pool.mp3"];
     e.gardenEvents=[];
-    for(const [url] of evs){
+    for(const url of evs){
       const buf=await tryBuf(url);
       const pan=new Tone.Panner(0).connect(e.busDry);
       const g=new Tone.Gain(0.0).connect(pan);
@@ -310,7 +336,7 @@ function updateMapping(){
   const major = bright*(1-sad);                     // sole sereno -> felice, maggiore
   const minor = Math.max(night, sad);               // notte o pioggia -> minore, triste
 
-  const cutoff=300+bright*3000+warm*900-cloud*1100-night*700-sad*1500+garden*1500;
+  const cutoff=300+bright*2600+warm*900-cloud*1100-night*700-sad*1500+garden*1400;
   e.filter.frequency.rampTo(clamp(cutoff,210,7000),6);
 
   e.voices.forEach(v=>{
@@ -332,29 +358,36 @@ function updateMapping(){
   if(state.snow>0){ e.filter.frequency.rampTo(clamp(cutoff*0.5,200,2200),8); e.fallbackVerb.roomSize.rampTo(0.45,8); }
   else { e.fallbackVerb.roomSize.rampTo(0.6+humid*0.32+night*0.05,6); }
 
-  // crossfade dei riverberi-stanza; fuori in giardino il riverbero delle pareti si ritira
+  // riverberi-stanza. lo slot sociale d'estate è giardino aperto -> il riverbero del soggiorno si ritira
   if(e.hasIR && e.convs){
-    const w=e.roomW, ind=1-0.85*garden;
+    const w=e.roomW, su=e.summer||0, ind=1-0.6*garden;
     e.convs.cucina.gain.rampTo(Math.sqrt(w.cucina)*WET*ind,4);
-    e.convs.soggiorno.gain.rampTo(Math.sqrt(w.soggiorno)*WET*ind,4);
+    e.convs.soggiorno.gain.rampTo(Math.sqrt(w.soggiorno*(1-su))*WET*ind,4);  // solo d'inverno
     e.convs.bedroom.gain.rampTo(Math.sqrt(w.bedroom)*WET*ind,4);
   }
   // voce: un filo più presente di giorno, si ritira di notte
   if(e.hum) e.hum.gain.gain.rampTo(HUM*(0.5+0.5*bright),6);
 
-  // letti del giardino: entrano quando si è fuori; cicale e uccelli anche col sole
-  if(e.gardenBeds){
-    e.gardenBeds.forEach(b=>{
-      let lv=b.base*garden;
-      if(b.kind==='cicale') lv*=(0.4+0.6*bright);
-      if(b.kind==='birds')  lv*=(0.5+0.5*bright);
+  // letti registrati - presenti e protagonisti. cucina/camera col loro orario;
+  // lo slot sociale: giardino d'estate, soggiorno d'inverno
+  if(e.beds){
+    const su=e.summer||0;
+    e.beds.forEach(b=>{
+      let lv=b.base;
+      if(b.garden){
+        lv*=e.roomW.soggiorno*su;                 // giardino: slot sociale + estate
+        if(b.kind==='cicale') lv*=(0.4+0.6*bright);
+        if(b.kind==='birds')  lv*=(0.5+0.5*bright);
+      } else if(b.room==='cucina')  lv*=e.roomW.cucina;
+      else if(b.room==='soggiorno') lv*=e.roomW.soggiorno*(1-su);   // soggiorno: slot sociale + inverno
+      else if(b.room==='bedroom')   lv*=e.roomW.bedroom;
       b.gain.gain.rampTo(lv,6);
     });
   }
 
   const pan=Math.sin((state.sunAz-180)*Math.PI/180)*0.4*(1-0.4*night);
   e.panner.pan.rampTo(clamp(pan,-0.4,0.4),12);   // si muove ma resta sempre udibile da entrambi i lati
-  e.master.gain.rampTo(0.40*(1-0.15*night),6);
+  e.master.gain.rampTo(0.36*(1-0.15*night),6);
 }
 
 function drift(){
@@ -397,21 +430,23 @@ function bloom(){
   setTimeout(bloom,(6+Math.random()*12)*1000);      // ricontrolla ogni 6-18 s
 }
 
-/* ===== EVENTI DEL GIARDINO — passi, voci, sparsi e panpottati ===== */
+/* ===== EVENTI — passi, voci: spesso, ben panpottati L/R ===== */
 function gardenEvent(){
   if(engine && engine.gardenEvents && engine.gardenEvents.length){
+    const bright=clamp(state.sunElev,0,55)/55;
     const g=engine.garden||0;
-    if(g>0.4 && Math.random()<g*0.5){
+    const chance=0.35+0.5*g;                          // sempre presenti di giorno, di più in giardino
+    if(bright>0.12 && Math.random()<chance){
       const ev=engine.gardenEvents[Math.floor(Math.random()*engine.gardenEvents.length)];
       try{
-        ev.pan.pan.value=(Math.random()*2-1)*0.7;     // a caso nello stereo
-        ev.gain.gain.value=0; ev.gain.gain.rampTo(0.45,1.5);
+        ev.pan.pan.value=(Math.random()<0.5?-1:1)*(0.6+Math.random()*0.3);  // bel pan netto L o R
+        ev.gain.gain.value=0; ev.gain.gain.rampTo(0.6,1.5);
         const off=Math.random()*Math.max(0.1,(ev.len||10)-6);
         ev.player.start(undefined, off);
       }catch(e){}
     }
   }
-  setTimeout(gardenEvent,(22+Math.random()*38)*1000); // ogni 22-60 s
+  setTimeout(gardenEvent,(12+Math.random()*22)*1000); // ogni 12-34 s
 }
 
 /* ===== VISIVO ===== */
@@ -437,23 +472,21 @@ function tick(){
   const d=currentDate();
   const sp=solarPosition(state.lat,state.lon,d); state.sunElev=sp.elev; state.sunAz=sp.az;
   const w=roomWeights(d.getHours()*60+d.getMinutes());
+  const summer=summerFactor(d);
   if(engine){
     engine.roomW=w;
-    const roomF=fundamentalFromWeights(w);
-    // GIARDINO legato al meteo: sereno + sole + caldo -> si esce; pioggia/nuvole/freddo/notte -> si rientra
-    const br=clamp(state.sunElev,0,55)/55, clr=1-clamp(state.cloud/100,0,1);
-    const dryw=1-clamp(state.precip/3,0,1), wm=clamp((state.temp+5)/40,0,1);
-    let g=br*clr*dryw*(0.35+0.65*wm);
-    engine.garden=clamp((g-0.12)*1.5,0,1);
-    engine.currentF=Math.exp((1-engine.garden)*Math.log(roomF)+engine.garden*Math.log(71.8)); // fuori scivola al re di casa
+    engine.summer=summer;
+    engine.garden=w.soggiorno*summer;               // slot sociale + estate = aperto (giardino)
+    engine.currentF=fundamentalFromWeights(w);       // la stanza tiene la sua nota, sempre
   }
   clockEl.textContent=`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
   if(timeOverride===null) scrub.value=d.getHours()*60+d.getMinutes();
-  const rc=document.querySelector('[data-k="room"]'); if(rc) rc.textContent=(engine&&engine.garden>0.5)?"giardino":roomLabel(w);
+  const rc=document.querySelector('[data-k="room"]');
+  if(rc) rc.textContent=roomLabel(w, summer);
   updateMapping(); paint();
 }
-scrub.addEventListener("input",()=>{ timeOverride=parseInt(scrub.value,10); liveBtn.classList.remove("on"); liveBtn.textContent="prova"; tick(); });
-liveBtn.addEventListener("click",()=>{ timeOverride=null; liveBtn.classList.add("on"); liveBtn.textContent="● ora reale"; tick(); });
+scrub.addEventListener("input",()=>{ timeOverride=parseInt(scrub.value,10); liveBtn.classList.remove("on"); liveBtn.textContent="preview"; tick(); });
+liveBtn.addEventListener("click",()=>{ timeOverride=null; liveBtn.classList.add("on"); liveBtn.textContent="● live"; tick(); });
 
 /* ===== AVVIO ===== */
 const gate=document.getElementById("gate");
