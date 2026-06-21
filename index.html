@@ -97,6 +97,19 @@ const ROOMS = {
   bedroom:   { F:98.0 }    // sol (G) - camera
 };
 
+/* ===== ARMONIA =====
+   gradi dell'accordo come rapporti giusti sopra la nota della stanza */
+const DEG = { root:1, m3:6/5, M3:5/4, P4:4/3, d5:7/5, P5:3/2, M6:5/3, m7:16/9, M7:15/8, oct:2, M9:9/4 };
+/* tavola degli accordi: ogni qualità è un profilo di gradi e livelli.
+   si attivano e si fondono secondo le circostanze, formandosi e sformandosi lenti. */
+const CHORDS = {
+  major:  {root:1.0, M3:0.55, P5:0.70, oct:0.40},                 // sole + caldo
+  major7: {root:1.0, M3:0.50, P5:0.60, M7:0.42, M9:0.34, oct:0.30}, // luce radente (alba/tramonto)
+  minor:  {root:1.0, m3:0.55, P5:0.70, oct:0.40},                 // freddo / coperto
+  dim:    {root:1.0, m3:0.55, d5:0.55, oct:0.34},                 // pioggia
+  sus:    {root:1.0, P4:0.50, P5:0.70, oct:0.40}                  // neutro / aperto
+};
+
 /* ===== ORARIO =====
    cucina 10-14 · sociale 14-18 · cucina 18-20 · sociale 20-22 · camera 22-10
    lo slot "sociale" (soggiorno) è giardino d'estate, soggiorno d'inverno.
@@ -186,38 +199,39 @@ const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
 const DRY=0.5, WET=0.62, HUM=0.10;
 
 function buildEngine(){
-  const master=new Tone.Gain(0.0);
-  const limiter=new Tone.Limiter(-2).toDestination();
-  master.connect(limiter);
+  const limiter=new Tone.Limiter(-1.5).toDestination();
+  const comp=new Tone.Compressor({threshold:-20, ratio:2.5, attack:0.25, release:0.7}).connect(limiter);
+  const master=new Tone.Gain(0.0).connect(comp);     // swell + notte; il comp livella, il limiter è solo sicurezza
 
   const dry=new Tone.Gain(DRY).connect(master);
   const wetBus=new Tone.Gain(1.0);
-  // riverbero di default (fallback se gli IR non caricano): algoritmico
   const fallbackVerb=new Tone.Freeverb({roomSize:0.8, dampening:2600}).connect(new Tone.Gain(0.5).connect(master));
   wetBus.connect(fallbackVerb);
 
   const filter=new Tone.Filter({type:"lowpass", frequency:900, Q:0.4});
   filter.connect(dry); filter.connect(wetBus);
   const panner=new Tone.Panner(0).connect(filter);
-  const busDry=new Tone.Gain(0.9).connect(panner);
+
+  // SOTTOGRUPPI: ognuno col suo livello, poi confluiscono nella catena-stanza condivisa
+  const synthBus =new Tone.Gain(0.85).connect(panner);   // bordone, aria, sopratoni, voce
+  const bedsBus  =new Tone.Gain(0.80).connect(panner);   // letti registrati
+  const eventsBus=new Tone.Gain(0.60).connect(panner);   // passi, voci, inserti
+  const busDry=synthBus;                                  // alias: il sintetico va nel synthBus
 
   const swell=new Tone.LFO({frequency:0.0035, min:0.74, max:1.0}).start();
   swell.connect(master.gain);
 
-  const spec=[
-    {mul:0.5, base:0.02, night:true },{mul:1.0, base:0.06 },{mul:1.2, base:0.05, night:true },
-    {mul:1.5, base:0.12 },{mul:2.0, base:0.08 },{mul:3.0, base:0.15 },
-    {mul:4.0, base:0.10 },{mul:5.0, base:0.05, high:true },{mul:6.0, base:0.025, high:true }
-  ];
-  const voices=spec.map((p,i)=>{
-    const osc=new Tone.Oscillator({frequency:71.8*p.mul, type:"sine"}).start();
-    const shimmer=new Tone.Gain(0.6), level=new Tone.Gain(0.0);
-    const span=((i%2)*2-1)*Math.min(0.55,(p.mul-1)*0.13);   // gravi al centro, acuti larghi nello stereo
-    const vpan=new Tone.Panner(span).connect(busDry);
+  // GRADI dell'accordo (rapporti giusti sopra la nota della stanza) - voci pure, niente scordamento
+  const degKeys=Object.keys(DEG);
+  const voices=degKeys.map((k,i)=>{
+    const osc=new Tone.Oscillator({frequency:71.8*DEG[k], type:"sine"}).start();
+    const shimmer=new Tone.Gain(0.8), level=new Tone.Gain(0.0);
+    const span=((i%2)*2-1)*Math.min(0.5, i*0.06);          // radice al centro, gradi alti larghi
+    const vpan=new Tone.Panner(span).connect(synthBus);
     osc.connect(shimmer); shimmer.connect(level); level.connect(vpan);
-    const lfo=new Tone.LFO({frequency:0.004+i*0.0012, min:0.5, max:1.0}).start();
+    const lfo=new Tone.LFO({frequency:0.0035+i*0.0007, min:0.7, max:1.0}).start();  // respiro lento e gentile
     lfo.connect(shimmer.gain);
-    return {osc, level, lfo, vpan, ...p};
+    return {osc, level, lfo, vpan, deg:k, ratio:DEG[k]};
   });
 
   const noise=new Tone.Noise("pink").start();
@@ -241,7 +255,8 @@ function buildEngine(){
 
   master.gain.rampTo(0.36, 6);
 
-  const e={ master, dry, filter, wetBus, fallbackVerb, panner, busDry, voices, nLevel, nFilter, rLevel, overtones,
+  const e={ master, dry, filter, wetBus, fallbackVerb, panner, busDry, synthBus, bedsBus, eventsBus,
+            voices, nLevel, nFilter, rLevel, overtones,
             currentF:71.8, roomW:{cucina:1,soggiorno:0,bedroom:0}, garden:0, hasIR:false, convs:null, hum:null,
             beds:null, gardenEvents:null };
   loadRoomAudio(e);   // asincrono: convoluzione + voce
@@ -254,7 +269,7 @@ async function loadBeds(e){
   const tryBuf=(url)=>Promise.race([
     new Promise((res,rej)=>{ const b=new Tone.Buffer(url, ()=>res(b), ()=>rej(0)); }),
     new Promise((_,rej)=>setTimeout(()=>rej(0),9000)) ]);
-  // letti registrati - più presenza. base più alte e un pan lento L<->R per ognuno
+  // letti registrati, granulati e astratti (memoria, non didascalici). pan lento L<->R per ognuno
   const defs=[
     ["audio/bed_cucina.mp3",            {room:"cucina",    base:0.62}],
     ["audio/bed_soggiorno_a.mp3",       {room:"soggiorno", base:0.50}],
@@ -264,28 +279,29 @@ async function loadBeds(e){
     ["audio/bed_giardino.mp3",          {garden:true, base:0.46}],
     ["audio/bed_cicale.mp3",            {garden:true, base:0.44, kind:"cicale"}],
     ["audio/bed_birds.mp3",             {garden:true, base:0.40, kind:"birds"}],
-    ["audio/bed_giardino_uccellini.mp3",{garden:true, base:0.38, kind:"birds"}]
+    ["audio/bed_giardino_uccellini.mp3",{garden:true, base:0.38, kind:"birds"}],
+    ["audio/bed_rain.mp3",              {rain:true, base:0.55}]   // granulato, entra solo quando piove
   ];
   e.beds=[];
   for(const [url,meta] of defs){
     try{ const buf=await tryBuf(url);
       const gp=new Tone.GrainPlayer({url:buf, loop:true, grainSize:0.6, overlap:0.32, detune:0});
       const g=new Tone.Gain(0.0);
-      const pan=new Tone.Panner(0).connect(e.busDry);
+      const pan=new Tone.Panner(0).connect(e.bedsBus);
       gp.connect(g); g.connect(pan); gp.start();
       const plfo=new Tone.LFO({frequency:0.005+Math.random()*0.008, min:-0.7, max:0.7, type:"sine"}).start();
       plfo.connect(pan.pan);                       // pan L<->R molto lento e largo
-      e.beds.push({player:gp, gain:g, pan, plfo, ...meta});
+      e.beds.push({player:gp, gain:g, pan, plfo, len:buf.duration, ...meta});
     }catch(err){}
   }
   if(!e.beds.length) e.beds=null;
-  // eventi: passi nelle foglie, voci alla piscina - one-shot, sparsi, panpottati a caso
+  // eventi: passi, voci - one-shot, sparsi, panpottati netti
   try{
     const evs=["audio/event_camminata.mp3","audio/event_pool.mp3"];
     e.gardenEvents=[];
     for(const url of evs){
       const buf=await tryBuf(url);
-      const pan=new Tone.Panner(0).connect(e.busDry);
+      const pan=new Tone.Panner(0).connect(e.eventsBus);
       const g=new Tone.Gain(0.0).connect(pan);
       const pl=new Tone.Player({url:buf, loop:false}); pl.connect(g);
       e.gardenEvents.push({player:pl, gain:g, pan, len:buf.duration});
@@ -332,22 +348,31 @@ function updateMapping(){
   const humid =clamp(state.humidity/100,0,1);
   const F=e.currentF;
   const garden=e.garden||0;                         // fuori = aria aperta
-  const sad   = clamp(state.precip/3,0,1);          // pioggia -> malinconia
-  const major = bright*(1-sad);                     // sole sereno -> felice, maggiore
-  const minor = Math.max(night, sad);               // notte o pioggia -> minore, triste
+  const sad   = clamp(state.precip/3,0,1);          // (per il filtro)
 
   const cutoff=300+bright*2600+warm*900-cloud*1100-night*700-sad*1500+garden*1400;
   e.filter.frequency.rampTo(clamp(cutoff,210,7000),20);
 
+  // ----- ACCORDO: pesi delle qualità dalle circostanze -----
+  const warmF =clamp((state.temp-12)/18,0,1);                    // caldo
+  const rainF =clamp(state.precip/2,0,1);                        // pioggia
+  const golden=clamp(1-Math.abs(state.sunElev-6)/9,0,1);        // luce radente (alba/tramonto)
+  let wMaj = bright*warmF*(1-rainF)*(1-golden);                  // sole + caldo -> maggiore
+  let wMaj7= golden*(1-rainF);                                   // tramonto/alba -> maggiore di settima
+  let wMin = (1-warmF)*(1-rainF)*(1-0.6*golden);                 // freddo/coperto -> minore
+  let wDim = rainF;                                              // pioggia -> diminuito
+  let wSus = 0.12;                                               // fondo neutro aperto
+  const sumW=wMaj+wMaj7+wMin+wDim+wSus || 1;
+  const W={major:wMaj/sumW, major7:wMaj7/sumW, minor:wMin/sumW, dim:wDim/sumW, sus:wSus/sumW};
+  // target per ogni grado = somma pesata dei profili degli accordi
+  const target={}; for(const k in DEG) target[k]=0;
+  for(const q in CHORDS){ const prof=CHORDS[q]; for(const dg in prof) target[dg]+=W[q]*prof[dg]; }
+  const lvlScale=0.55*(1-0.18*night);                           // un filo più basso di notte
+
   e.voices.forEach(v=>{
-    let amp=v.base;
-    if(v.high) amp*=major*0.6;
-    else if(v.night) amp*=minor;
-    else amp*=(0.7+0.3*bright);
-    if(v.mul===1.5) amp*=(1-0.25*minor);
-    v.level.gain.rampTo(amp,18);
-    v.osc.frequency.rampTo(F*v.mul*(1+(warm-0.5)*0.004*v.mul),22);
-    v.lfo.frequency.rampTo((0.0035+wind*0.005)*(1-0.4*night),25);   // onda lentissima
+    v.osc.frequency.rampTo(F*v.ratio, 20);                       // segue la nota della stanza, intonazione esatta
+    v.level.gain.rampTo((target[v.deg]||0)*lvlScale, 18);        // il grado si forma o si sforma lento
+    v.lfo.frequency.rampTo((0.0035+wind*0.004)*(1-0.4*night),25);
   });
 
   e.nLevel.gain.rampTo((cloud*0.12+wind*0.04)*(1-0.4*night),16);
@@ -371,15 +396,17 @@ function updateMapping(){
   // letti registrati - presenti e protagonisti. cucina/camera col loro orario;
   // lo slot sociale: giardino d'estate, soggiorno d'inverno
   if(e.beds){
-    const su=e.summer||0;
+    const su=e.summer||0, rainAmt=clamp(state.precip/2,0,1);
     e.beds.forEach(b=>{
       let lv=b.base;
-      if(b.garden){
-        lv*=e.roomW.soggiorno*su;                 // giardino: slot sociale + estate
+      if(b.rain){
+        lv*=rainAmt;                              // entra solo quando piove, granulata
+      } else if(b.garden){
+        lv*=e.roomW.soggiorno*su*(1-rainAmt);     // giardino: estate, ma la pioggia lo richiude
         if(b.kind==='cicale') lv*=(0.4+0.6*bright);
         if(b.kind==='birds')  lv*=(0.5+0.5*bright);
       } else if(b.room==='cucina')  lv*=e.roomW.cucina;
-      else if(b.room==='soggiorno') lv*=e.roomW.soggiorno*(1-su);   // soggiorno: slot sociale + inverno
+      else if(b.room==='soggiorno') lv*=e.roomW.soggiorno*(1-su);
       else if(b.room==='bedroom')   lv*=e.roomW.bedroom;
       b.gain.gain.rampTo(lv,16);
     });
@@ -434,9 +461,10 @@ function bloom(){
 function gardenEvent(){
   if(engine && engine.gardenEvents && engine.gardenEvents.length){
     const bright=clamp(state.sunElev,0,55)/55;
+    const rainAmt=clamp(state.precip/2,0,1);
     const g=engine.garden||0;
     const chance=0.25+0.4*g;                          // presenti ma senza fretta
-    if(bright>0.12 && Math.random()<chance){
+    if(bright>0.12 && rainAmt<0.3 && Math.random()<chance){
       const ev=engine.gardenEvents[Math.floor(Math.random()*engine.gardenEvents.length)];
       try{
         ev.pan.pan.value=(Math.random()<0.5?-1:1)*(0.6+Math.random()*0.3);  // bel pan netto L o R
@@ -447,6 +475,18 @@ function gardenEvent(){
     }
   }
   setTimeout(gardenEvent,(35+Math.random()*45)*1000); // ogni 35-80 s, con calma
+}
+
+/* ===== I grani vagano nel buffer: nessun loop riconoscibile ===== */
+function wander(){
+  if(engine && engine.beds){
+    engine.beds.forEach(b=>{
+      const dur=b.len||10, win=Math.min(dur, 4+Math.random()*4);
+      const start=Math.random()*Math.max(0.01, dur-win);
+      try{ b.player.loopStart=start; b.player.loopEnd=start+win; }catch(e){}
+    });
+  }
+  setTimeout(wander,(7+Math.random()*9)*1000);  // sposta la finestra di lettura ogni 7-16 s
 }
 
 /* ===== VISIVO ===== */
@@ -494,7 +534,7 @@ gate.addEventListener("click", async ()=>{
   gate.classList.add("fade-out"); setTimeout(()=>gate.remove(),2400);
   await Tone.start(); await locate();
   engine=buildEngine(); await fetchWeather(); tick();
-  setInterval(tick,1000); setInterval(fetchWeather,600000); setInterval(drift,90000); bloom(); gardenEvent();
+  setInterval(tick,1000); setInterval(fetchWeather,600000); setInterval(drift,90000); bloom(); gardenEvent(); wander();
 },{once:true});
 tick();
 </script>
