@@ -104,6 +104,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
 <script>
 "use strict";
+window.addEventListener("error", e=>{ const el=document.getElementById("astat"); if(el) el.textContent="err: "+(e.message||e.error); });
 
 /* ===== STATO ===== */
 const state = {
@@ -348,10 +349,10 @@ async function loadBeds(e){
       const gp=new Tone.GrainPlayer({url:buf, loop:true, grainSize:0.6, overlap:0.32, detune:0});
       const g=new Tone.Gain(0.0);
       const pan=new Tone.Panner(0).connect(e.bedsBus);
-      gp.connect(g); g.connect(pan); gp.start();
+      gp.connect(g); g.connect(pan);
       const plfo=new Tone.LFO({frequency:0.005+Math.random()*0.008, min:-0.7, max:0.7, type:"sine"}).start();
       plfo.connect(pan.pan);                       // pan L<->R molto lento e largo
-      e.beds.push({player:gp, gain:g, pan, plfo, len:buf.duration, presT:1, ...meta});
+      e.beds.push({player:gp, gain:g, pan, plfo, len:buf.duration, presT:1, playing:false, ...meta});
       noteAudio(true);
     }catch(err){ noteAudio(false,url); }
   }
@@ -498,6 +499,8 @@ function updateMapping(){
       else if(b.room==='soggiorno') lv*=e.roomW.soggiorno*(1-su);
       else if(b.room==='bedroom')   lv*=e.roomW.bedroom;
       lv*=(b.presT!=null?b.presT:1);                  // entra, esce, scompare
+      if(lv>0.012 && !b.playing){ try{b.player.start();}catch(e){} b.playing=true; }
+      else if(lv<=0.005 && b.playing){ try{b.player.stop();}catch(e){} b.playing=false; }
       b.gain.gain.rampTo(lv,9);
     });
   }
