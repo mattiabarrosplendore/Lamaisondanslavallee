@@ -330,7 +330,10 @@ async function loadBeds(e){
   const tryBuf=loadBuffer;
   // letti registrati, granulati e astratti (memoria, non didascalici). pan lento L<->R per ognuno
   const defs=[
-    ["audio/bed_cucina.mp3",            {room:"cucina",    base:0.62}],
+    ["audio/bed_cucina.mp3",            {room:"cucina",    base:0.52}],
+    ["audio/bed_cucina_b.mp3",          {room:"cucina",    base:0.44}],
+    ["audio/bed_cucina_c.mp3",          {room:"cucina",    base:0.44}],
+    ["audio/bed_cucina_d.mp3",          {room:"cucina",    base:0.44}],
     ["audio/bed_soggiorno_a.mp3",       {room:"soggiorno", base:0.50}],
     ["audio/bed_soggiorno_b.mp3",       {room:"soggiorno", base:0.46}],
     ["audio/bed_notte_a.mp3",           {room:"bedroom",   base:0.72}],
@@ -380,7 +383,10 @@ async function loadBeds(e){
       ["audio/insert_canto_guitar.mp3", {room:"any"}],
       ["audio/insert_guitar_voice.mp3", {room:"any"}],
       ["audio/insert_voce.mp3",         {room:"any"}],
-      ["audio/insert_radio.mp3",        {room:"cucina", radio:true}]
+      ["audio/insert_radio.mp3",        {room:"cucina", radio:true}],
+      ["audio/theme_d.mp3",             {room:"cucina",    theme:true}],            // giro di tastiera in re
+      ["audio/theme_g.mp3",             {room:"bedroom",   theme:true}],            // in sol, la notte
+      ["audio/theme_a.mp3",             {room:"soggiorno", theme:true, summerOnly:true}] // in la, solo giardino d'estate
     ];
     e.inserts=[];
     for(const [url,meta] of ins){
@@ -604,14 +610,16 @@ function insertEvent(){
   if(engine && engine.inserts && engine.inserts.length){
     const w=engine.roomW||{cucina:1,soggiorno:0,bedroom:0};
     let cur="cucina",m=-1; for(const k in w){ if(w[k]>m){m=w[k];cur=k;} }
-    const pool=engine.inserts.filter(x=>x.room===cur || x.room==="any");
+    const su=engine.summer||0;
+    const pool=engine.inserts.filter(x=>(x.room===cur || x.room==="any") && (!x.summerOnly || su>0.5));
     const bright=clamp(state.sunElev,0,55)/55;
-    if(pool.length && bright>0.05 && Math.random()<0.7){     // di giorno, più spesso di prima
+    const dayOK=bright>0.05 || cur==="bedroom";              // i temi notturni valgono di notte
+    if(pool.length && dayOK && Math.random()<0.7){
       const ins=pool[Math.floor(Math.random()*pool.length)];
-      const lvl=ins.radio?0.34:0.52;                         // più presenti; la radio un filo sotto
-      const granulate=Math.random()<0.5;                     // a volte esplicito, a volte granulato
+      const lvl=ins.theme?0.6:(ins.radio?0.34:0.52);         // i temi un po' più presenti
+      const granulate=!ins.theme && Math.random()<0.5;       // i temi entrano espliciti, sono melodie da sentire
       try{
-        ins.pan.pan.value=(Math.random()*2-1)*0.55;
+        ins.pan.pan.value=(Math.random()*2-1)*(ins.theme?0.35:0.55);
         if(granulate){
           const seg=1+Math.random()*2.2;
           ins.grain.loopStart=Math.random()*Math.max(0.01,(ins.len||10)-seg);
@@ -631,7 +639,7 @@ function insertEvent(){
       }catch(e){}
     }
   }
-  setTimeout(insertEvent,(90+Math.random()*120)*1000);      // ogni 1,5-3,5 min
+  setTimeout(insertEvent,(80+Math.random()*100)*1000);      // ogni ~1,5-3 min
 }
 
 /* ===== VISIVO ===== */
