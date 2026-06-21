@@ -234,10 +234,25 @@ function locate(){ return new Promise(res=>{
 /* ===== MOTORE ===== */
 let engine=null, engineOut=null;
 let userVolume=0.75;
-const AUDIO={ok:0,total:0};
-function noteAudio(ok){ AUDIO.total++; if(ok)AUDIO.ok++;
-  const el=document.getElementById("astat"); if(el) el.textContent=`audio ${AUDIO.ok}/${AUDIO.total}`; }
+const AUDIO={ok:0,total:0,firstFail:null};
+function noteAudio(ok,url){
+  AUDIO.total++; if(ok)AUDIO.ok++;
+  if(!ok && !AUDIO.firstFail && url) AUDIO.firstFail=url;
+  const el=document.getElementById("astat"); if(!el) return;
+  let s=`audio ${AUDIO.ok}/${AUDIO.total}`;
+  if(AUDIO.ok===0 && AUDIO.total>=4)
+    s += (location.protocol==="file:") ? " · file:// → apri da https"
+       : (AUDIO.firstFail ? " · manca "+AUDIO.firstFail : "");
+  el.textContent=s;
+}
 const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+/* carica un buffer: prova "audio/NOME", e se non c'è prova "NOME" nella stessa cartella di index.html */
+function loadBuffer(url){
+  const one=(u)=>Promise.race([
+    new Promise((res,rej)=>{ const b=new Tone.Buffer(u, ()=>res(b), ()=>rej(0)); }),
+    new Promise((_,rej)=>setTimeout(()=>rej(0),9000)) ]);
+  return one(url).catch(()=>one(url.replace(/^audio\//,"")));
+}
 const DRY=0.5, WET=0.62, HUM=0.10;
 
 function buildEngine(){
@@ -311,9 +326,7 @@ function buildEngine(){
 
 /* carica i letti (per stanza + giardino) e gli eventi; se falliscono resta tutto sintetico */
 async function loadBeds(e){
-  const tryBuf=(url)=>Promise.race([
-    new Promise((res,rej)=>{ const b=new Tone.Buffer(url, ()=>res(b), ()=>rej(0)); }),
-    new Promise((_,rej)=>setTimeout(()=>rej(0),9000)) ]);
+  const tryBuf=loadBuffer;
   // letti registrati, granulati e astratti (memoria, non didascalici). pan lento L<->R per ognuno
   const defs=[
     ["audio/bed_cucina.mp3",            {room:"cucina",    base:0.62}],
@@ -340,7 +353,7 @@ async function loadBeds(e){
       plfo.connect(pan.pan);                       // pan L<->R molto lento e largo
       e.beds.push({player:gp, gain:g, pan, plfo, len:buf.duration, presT:1, ...meta});
       noteAudio(true);
-    }catch(err){ noteAudio(false); }
+    }catch(err){ noteAudio(false,url); }
   }
   if(!e.beds.length) e.beds=null;
   // eventi: passi, voci, conversazioni - one-shot, sparsi (la _lr è già stereo L/R)
@@ -354,7 +367,7 @@ async function loadBeds(e){
       const pl=new Tone.Player({url:buf, loop:false}); pl.connect(g);
       e.gardenEvents.push({player:pl, gain:g, pan, len:buf.duration, stereo:url.includes("_lr")});
       noteAudio(true);
-    }catch(err){ noteAudio(false); }
+    }catch(err){ noteAudio(false,url); }
   }
   if(!e.gardenEvents.length) e.gardenEvents=null;
   // INSERTI musicali: chitarre re->cucina, sol->camera; canti consonanti ovunque; radio in cucina (suono trovato)
@@ -379,7 +392,7 @@ async function loadBeds(e){
       gp.connect(g);
       e.inserts.push({player:pl, grain:gp, gain:g, pan, len:buf.duration, ...meta});
       noteAudio(true);
-      }catch(err){ noteAudio(false); }
+      }catch(err){ noteAudio(false,url); }
     }
     if(!e.inserts.length) e.inserts=null;
   }
@@ -387,10 +400,7 @@ async function loadBeds(e){
 
 /* carica IR e humming; se falliscono (es. anteprima), resta sul riverbero algoritmico */
 async function loadRoomAudio(e){
-  const tryBuf=(url)=>Promise.race([
-    new Promise((res,rej)=>{ const b=new Tone.Buffer(url, ()=>res(b), ()=>rej(0)); }),
-    new Promise((_,rej)=>setTimeout(()=>rej(0),9000))
-  ]);
+  const tryBuf=loadBuffer;
   // convoluzione per stanza
   try{
     const [bc,bs,bb]=await Promise.all([
@@ -401,7 +411,7 @@ async function loadRoomAudio(e){
     e.convs={ cucina:mk(bc), soggiorno:mk(bs), bedroom:mk(bb) };
     e.wetBus.disconnect(e.fallbackVerb);   // spegne il fallback, ora suonano le stanze vere
     e.hasIR=true; noteAudio(true); noteAudio(true); noteAudio(true);
-  }catch(err){ noteAudio(false); /* resta sul fallback */ }
+  }catch(err){ noteAudio(false,"audio/IR_cucina.wav"); /* resta sul fallback */ }
   // humming, lette a grani, dentro la stanza
   try{
     const hb=await tryBuf("audio/humming.wav");
@@ -409,7 +419,7 @@ async function loadRoomAudio(e){
     const gHum=new Tone.Gain(0.0).connect(e.busDry);
     gp.connect(gHum); gp.start();
     e.hum={ player:gp, gain:gHum }; noteAudio(true);
-  }catch(err){ noteAudio(false); /* niente voce in anteprima */ }
+  }catch(err){ noteAudio(false,"audio/humming.wav"); /* niente voce in anteprima */ }
 }
 
 /* ===== MAPPATURA ===== */
