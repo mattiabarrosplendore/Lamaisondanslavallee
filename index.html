@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Perpetual Manoir</title>
+<title>La maison dans la vallée</title>
 <style>
   :root{
     --sky-top:#14171c; --sky-bot:#05070a;
@@ -24,7 +24,7 @@
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/></svg>");
     opacity:.035; mix-blend-mode:screen; pointer-events:none; }
   #title{ position:fixed; top:clamp(20px,5vw,56px); left:clamp(20px,5vw,56px);
-    font-size:12px; letter-spacing:.42em; text-transform:uppercase; color:var(--ink-dim); }
+    font-size:12px; letter-spacing:.34em; text-transform:uppercase; color:var(--ink-dim); max-width:60vw; line-height:1.5; }
   #place{ position:fixed; top:clamp(20px,5vw,56px); right:clamp(20px,5vw,56px);
     font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-dim); text-align:right; display:flex; flex-direction:column; gap:4px; }
   #place .coord{ font-size:9px; letter-spacing:.1em; opacity:.7; }
@@ -53,6 +53,7 @@
   .cell .v{ display:block; color:var(--ink); font-size:14px; letter-spacing:.04em; margin-top:5px; text-transform:none; }
   .cell .v small{ color:var(--ink-dim); font-size:10px; }
   @media (max-width:680px){
+    #title{ font-size:9px; letter-spacing:.2em; max-width:46vw; line-height:1.45; }
     #log{ font-size:8px; gap:9px 10px; grid-template-columns:repeat(4,1fr); padding-bottom:calc(14px + env(safe-area-inset-bottom)); }
     #log .v{ font-size:11px; margin-top:3px; }
     #log .v small{ font-size:8px; }
@@ -75,7 +76,7 @@
 </head>
 <body>
   <div id="sky"></div><div id="horizon"></div><div id="grain"></div>
-  <div id="title">Perpetual Manoir</div>
+  <div id="title">La maison dans la vallée</div>
   <div id="place">Belvès, France<span class="coord">44.7767°N · 1.0080°E</span><span class="date" id="today">—</span></div>
 
   <div id="vol"><span class="vlab">volume</span><input id="master" type="range" min="0" max="100" value="75"><span id="astat"></span></div>
@@ -100,9 +101,9 @@
   </div>
 
   <div id="gate">
-    <h1>Perpetual Manoir</h1>
+    <h1>La maison dans la vallée</h1>
     <div class="start">tap to begin</div>
-    <div class="sub">France. A small village in the hills of the Dordogne. A little corner of life, culture and paradise called the Manoir de la Moissie. The resonance of the house's rooms and of its garden, and how they shift through the seasons, the weather, the day and the night. Perpetual, like life on this earth.</div>
+    <div class="sub">France. A small village in the hills of the Périgord Noir, in the Dordogne. A house in the valley. A little corner of life and love and culture called the Manoir de la Moissie, where some days last forever. And they move through the seasons, the weather, the day and the night. It all begins with the resonance of the rooms of the house and its garden. And countless field recordings - people, empty rooms, animals, sunny and rainy days - that keep a moment in time alive. And they go on, perpetually, the way life does.</div>
   </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
@@ -377,6 +378,7 @@ async function loadBeds(e){
     const pl=new Tone.Player({url:buf, loop:false}); pl.connect(gain);
     const dry=new Tone.Gain(meta.dry!=null?meta.dry:1.0).connect(e.eventsBus); pan.connect(dry);
     if(meta.voice){ const w=new Tone.Gain(meta.wet!=null?meta.wet:0.85).connect(e.voiceBlur); pan.connect(w); }      // lontane, sfocate
+    else if(meta.choir){ const w=new Tone.Gain(meta.wet!=null?meta.wet:0.8).connect(e.voiceVerb); pan.connect(w); } // cori: si disperdono, non sfocati
     else if(meta.guitar){ const w=new Tone.Gain(meta.wet!=null?meta.wet:0.5).connect(e.guitarVerb); pan.connect(w); } // pulita + plate
     let grain=null;
     if(!meta.clean){ grain=new Tone.GrainPlayer({url:buf, loop:true, grainSize:0.2, overlap:0.1}); grain.connect(gain); }
@@ -391,7 +393,10 @@ async function loadBeds(e){
     ["audio/event_conversation_studio.mp3", {rooms:"any", voice:true, dry:0.35, wet:0.95}],
     ["audio/event_conversation_lr.mp3",     {rooms:"any", voice:true, dry:0.40, wet:0.85, stereo:true}],
     ["audio/event_shaving.mp3",             {rooms:["cucina","soggiorno"], dry:0.85, voice:true, wet:0.4}], // cucina o giardino
-    ["audio/event_girls.mp3",               {rooms:"any", voice:true, dry:0.40, wet:0.90, hours:[9,24]}]    // ovunque, mai 0-9
+    ["audio/event_girls.mp3",               {rooms:"any", voice:true, dry:0.40, wet:0.90, hours:[9,24]}],   // ovunque, mai 0-9
+    ["audio/event_kitchen_talk.mp3",        {rooms:["cucina"], voice:true, dry:0.40, wet:0.85}],            // chiacchiera in cucina
+    ["audio/event_kid.mp3",                 {rooms:"any", voice:true, dry:0.40, wet:0.85, hours:[9,22]}],   // un bambino, di giorno
+    ["audio/event_tuffi.mp3",               {rooms:"any", summerOnly:true}]                                  // tuffi in piscina, estate
   ];
   e.gardenEvents=[];
   for(const [url,meta] of evDefs){
@@ -404,18 +409,31 @@ async function loadBeds(e){
   const insDefs=[
     ["audio/insert_guitar_d.mp3",     {rooms:["cucina"],  clean:true, guitar:true, hardPan:true, wet:0.5}],
     ["audio/insert_guitar_g.mp3",     {rooms:["bedroom"], clean:true, guitar:true, hardPan:true, wet:0.5}],
-    ["audio/insert_canto.mp3",        {rooms:"any"}],
-    ["audio/insert_canto_guitar.mp3", {rooms:"any"}],
+    ["audio/insert_canto.mp3",        {rooms:"any", choir:true, dry:0.5, wet:0.8}],   // cori: riverbero, si disperdono
+    ["audio/insert_canto_guitar.mp3", {rooms:"any", choir:true, dry:0.55, wet:0.7}],
     ["audio/insert_guitar_voice.mp3", {rooms:"any"}],
     ["audio/insert_voce.mp3",         {rooms:"any"}],
-    ["audio/insert_radio.mp3",        {rooms:["cucina","soggiorno"], radio:true}],
-    ["audio/insert_radio_b.mp3",      {rooms:["cucina","soggiorno"], radio:true}],
-    ["audio/insert_radio_c.mp3",      {rooms:["cucina","soggiorno"], radio:true}],
-    ["audio/insert_radio_d.mp3",      {rooms:["cucina","soggiorno"], radio:true}],
-    ["audio/insert_radio_e.mp3",      {rooms:["cucina","soggiorno"], radio:true}],
+    ["audio/insert_radio.mp3",        {rooms:["cucina","soggiorno"], radio:true, hours:[7,24]}],
+    ["audio/insert_radio_b.mp3",      {rooms:["cucina","soggiorno"], radio:true, hours:[7,24]}],
+    ["audio/insert_radio_c.mp3",      {rooms:["cucina","soggiorno"], radio:true, hours:[7,24]}],
+    ["audio/insert_radio_d.mp3",      {rooms:["cucina","soggiorno"], radio:true, hours:[7,24]}],
+    ["audio/insert_radio_e.mp3",      {rooms:["cucina","soggiorno"], radio:true, hours:[7,24]}],
+    ["audio/radio_uomo.mp3",          {rooms:"any", radio:true, hours:[7,24]}],        // radio, sempre fino a mezzanotte
+    ["audio/radio_donna.mp3",         {rooms:"any", radio:true, hours:[7,24]}],
+    ["audio/radio_night.mp3",         {rooms:"any", radio:true, hours:[22,7]}],        // solo di notte, fuori
     ["audio/theme_d.mp3",             {rooms:["cucina"],    theme:true, clean:true}],
     ["audio/theme_g.mp3",             {rooms:["bedroom"],   theme:true, clean:true}],
-    ["audio/theme_a.mp3",             {rooms:["soggiorno"], theme:true, clean:true, summerOnly:true}]
+    ["audio/theme_a.mp3",             {rooms:["soggiorno"], theme:true, clean:true, summerOnly:true}],
+    ["audio/gliss_d.mp3",             {rooms:["cucina"],    clean:true, lvl:0.5}],     // glissandi, accordati alla stanza
+    ["audio/gliss_d_rev.mp3",         {rooms:["cucina"],    clean:true, lvl:0.5}],
+    ["audio/gliss_g.mp3",             {rooms:["bedroom"],   clean:true, lvl:0.5}],
+    ["audio/gliss_g_rev.mp3",         {rooms:["bedroom"],   clean:true, lvl:0.5}],
+    ["audio/gliss_b.mp3",             {rooms:["soggiorno"], clean:true, lvl:0.5, winterOnly:true}], // si = soggiorno d'inverno
+    ["audio/gliss_b_rev.mp3",         {rooms:["soggiorno"], clean:true, lvl:0.5, winterOnly:true}],
+    ["audio/bell_d.mp3",              {rooms:["cucina"],    clean:true, lvl:0.5}],     // campana in re
+    ["audio/pad_b.mp3",               {rooms:["soggiorno"], clean:true, lvl:0.4, winterOnly:true}], // pad in si, soggiorno inverno
+    ["audio/pad_g.mp3",               {rooms:["bedroom"],   clean:true, lvl:0.4}],     // pad in sol, notte
+    ["audio/sub_g.mp3",               {rooms:["bedroom"],   clean:true, lvl:0.45}]     // sub in sol, notte (sotto il bordone)
   ];
   e.inserts=[];
   for(const [url,meta] of insDefs){
@@ -577,7 +595,10 @@ function currentRoom(){ const w=(engine&&engine.roomW)||{cucina:1,soggiorno:0,be
   let cur="cucina",m=-1; for(const k in w){ if(w[k]>m){m=w[k];cur=k;} } return cur; }
 function shotEligible(meta,cur,su,hour){
   if(meta.summerOnly && su<=0.5) return false;
-  if(meta.hours && !(hour>=meta.hours[0] && hour<meta.hours[1])) return false;
+  if(meta.winterOnly && su>0.5) return false;
+  if(meta.hours){ const a=meta.hours[0], b=meta.hours[1];
+    const ok=(a<=b) ? (hour>=a && hour<b) : (hour>=a || hour<b);   // [22,7] = notte, a cavallo di mezzanotte
+    if(!ok) return false; }
   if(!meta.rooms || meta.rooms==="any") return true;
   return meta.rooms.includes(cur);
 }
@@ -668,7 +689,7 @@ function insertEvent(){
     const pool=engine.inserts.filter(x=>shotEligible(x,cur,su,hour));
     if(pool.length && dayOK && Math.random()<0.7){
       const ins=pool[Math.floor(Math.random()*pool.length)];
-      const lvl=ins.theme?0.6:(ins.radio?0.34:0.52);
+      const lvl=ins.lvl!=null?ins.lvl:(ins.theme?0.6:(ins.radio?0.34:0.52));
       const granulate=!ins.clean && Math.random()<0.5;       // chitarre e temi mai granulati; sempre espliciti
       try{
         if(ins.hardPan)      ins.pan.pan.value=(Math.random()<0.5?-1:1);          // chitarre: solo DX o SX
