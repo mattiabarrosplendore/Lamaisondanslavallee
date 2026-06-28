@@ -15,9 +15,20 @@
   body{ background:#05070a; color:var(--ink);
     font-family: ui-monospace,"SF Mono",Menlo,Consolas,monospace;
     overflow:hidden; -webkit-font-smoothing:antialiased; }
-  #sky{ position:fixed; inset:0;
+  #sky{ position:fixed; inset:0; z-index:-3;
     background:radial-gradient(120% 90% at 50% var(--horizon), var(--sky-top) 0%, var(--sky-bot) 100%);
     transition:background 8s linear; }
+  #bg{ position:fixed; inset:0; z-index:-2; overflow:hidden; }
+  #photo{ position:absolute; inset:-4%; width:108%; height:108%;
+    background:url("bg.jpg") center/cover no-repeat; will-change:filter;
+    transition:filter 6s linear; }
+  #bg .tint{ position:absolute; inset:0; pointer-events:none; transition:opacity 6s linear; }
+  #warm{ background:rgb(255,150,50);  mix-blend-mode:overlay; opacity:0; }
+  #cold{ background:rgb(70,130,230);  mix-blend-mode:overlay; opacity:0; }
+  #haze{ background:rgb(170,178,188); mix-blend-mode:screen;  opacity:0; }
+  #night{ background:rgb(6,10,26); opacity:0; }
+  #vign{ position:fixed; inset:0; z-index:-1; pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 42%, transparent 55%, rgba(0,0,0,.5) 100%); }
   #horizon{ position:fixed; left:0; right:0; top:var(--horizon); height:1px;
     background:var(--line); transition:top 8s linear, background 8s linear; }
   #grain{ position:fixed; inset:-50%;
@@ -75,7 +86,10 @@
 </style>
 </head>
 <body>
-  <div id="sky"></div><div id="horizon"></div><div id="grain"></div>
+  <div id="sky"></div>
+  <div id="bg"><div id="photo"></div><div id="warm" class="tint"></div><div id="cold" class="tint"></div><div id="haze" class="tint"></div><div id="night" class="tint"></div></div>
+  <div id="vign"></div>
+  <div id="horizon"></div><div id="grain"></div>
   <div id="title">La maison dans la vallée</div>
   <div id="place">Belvès, France<span class="coord">44.7767°N · 1.0080°E</span><span class="date" id="today">—</span></div>
 
@@ -761,6 +775,27 @@ function paint(){
   r.setProperty("--sky-top",`hsl(${hue} ${sat}% ${topL}%)`);
   r.setProperty("--sky-bot",`hsl(${hue} ${clamp(sat-10,0,100)}% ${botL}%)`);
   r.setProperty("--horizon",`${clamp(86-bright*46,26,90)}%`);
+  // --- FOTO viva: stessi segnali del suono guidano luce, colore, calore, buio ---
+  const summerF=summerFactor(currentDate());
+  const cl2=clamp(state.cloud/100,0,1), rain=clamp(state.precip/2,0,1);
+  const dayness=clamp((elev+6)/12,0,1), ni=1-dayness;                 // notte vera dal sole
+  const warmth=clamp((state.temp-12)/26,-1,1);                         // caldo>0 freddo<0
+  const gold=clamp(1-Math.abs(elev-3)/8,0,1);                          // ora dorata (sole basso)
+  const ph=document.getElementById("photo");
+  if(ph){
+    const bri=(0.5+0.62*bright)*(1-0.15*cl2);
+    const con=1.0+0.12*(1-cl2)-0.10*rain;
+    const satF=(0.5+0.7*summerF)*(1-0.5*cl2)*(1-0.5*rain)*(1-0.3*ni);
+    const hr=warmth*6-(1-summerF)*6, bl=rain*3+cl2*0.4;
+    ph.style.filter=`brightness(${bri.toFixed(3)}) contrast(${con.toFixed(3)}) saturate(${satF.toFixed(3)}) hue-rotate(${hr.toFixed(1)}deg) blur(${bl.toFixed(2)}px)`;
+    const warmO=clamp(Math.max(0,warmth)*0.5+gold*0.6,0,1)*0.4;
+    const coldO=clamp(Math.max(0,-warmth)*0.6+ni*0.5+(1-summerF)*0.3-gold*0.5,0,1)*0.45;
+    const g=id=>document.getElementById(id);
+    g("warm").style.opacity=warmO.toFixed(3);
+    g("cold").style.opacity=coldO.toFixed(3);
+    g("haze").style.opacity=(cl2*0.16+rain*0.2).toFixed(3);
+    g("night").style.opacity=(ni*0.8).toFixed(3);
+  }
   const set=(k,v)=>{ const el=document.querySelector(`[data-k="${k}"]`); if(el) el.innerHTML=v; };
   set("sun",`${state.sunElev>0?"+":""}${state.sunElev.toFixed(1)}<small>°</small>`);
   set("az",`${Math.round(state.sunAz)}<small>° ${compass(state.sunAz)}</small>`);
